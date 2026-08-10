@@ -13,7 +13,7 @@ path = ".."
 [[require]]
 name = "hex-test-kit"
 git = "https://github.com/leanprover/hex-test-kit.git"
-rev = "d06a24207b061257a56199f081fbce9edc6d4e21"
+rev = "36e7d67fc3a511ca9d69f360def6e50769e439d4"
 
 [[lean_lib]]
 name = "HexLLLConformance"
