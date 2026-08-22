@@ -5,11 +5,11 @@ package «hex-lll» where
 
   leanOptions := #[⟨`doc.verso, true⟩, ⟨`doc.verso.suggestions, false⟩]
 require HexBasic from git
-  "https://github.com/leanprover/hex-basic.git" @ "365881fb205210e8d27c5eb011f7ddb3fe020373"
+  "https://github.com/leanprover/hex-basic.git" @ "591c146eeee0ef301a110cd33c19cc0cf1e07352"
 require HexMatrix from git
-  "https://github.com/leanprover/hex-matrix.git" @ "e76a18ae921d8d8907c8ea37235a0ca5b94698cd"
+  "https://github.com/leanprover/hex-matrix.git" @ "e5483ea2d5b666618a54d0ea50bcbe6ba3608d39"
 require HexGramSchmidt from git
-  "https://github.com/leanprover/hex-gram-schmidt.git" @ "5bb2f1b040ff2ed481233ad396cf50cd86d26cc3"
+  "https://github.com/leanprover/hex-gram-schmidt.git" @ "74c1e10220f02eaffa090656ef076bca0d769103"
 
 private def hexlllProviderOTarget (pkg : Package) : FetchM (Job FilePath) := do
   let oFile := pkg.dir / defaultBuildDir / "HexLLL" / "ffi" / "lean_hexlll_provider.o"
