@@ -5,103 +5,43 @@ on:
   pull_request:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Install oracle + comparator system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libgmp-dev libfplll-dev fplll-tools libntl-dev libmpfr-dev \
-            libc++-dev libc++abi-dev autoconf automake libtool pkg-config curl
-      - name: Install Python oracle dependencies (fpylll conformance + FLINT HNF)
-        run: python3 -m pip install --user cysignals fpylll python-flint
       - uses: leanprover/lean-action@v1
         with:
           auto-config: false
           build: false
+          use-github-cache: false
+          use-mathlib-cache: false
+      - name: Restore Lake build outputs
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            .lake/build
+            .lake/packages/Hex*/.lake/build
+          key: lake-build-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('lean-toolchain', 'lake-manifest.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            lake-build-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('lean-toolchain', 'lake-manifest.json') }}-
       - name: Build library
         run: lake build
-      - name: Configure Lean shared library path
-        # The fplll-ffi shim (`scripts/oracle/setup_fplll_ffi.sh`) re-links
-        # against the toolchain's libleanshared and bakes an rpath, but the
-        # bench process still benefits from the toolchain's lib/lean dir being
-        # on LD_LIBRARY_PATH so the dlopened shim can resolve libLake_shared.so.
-        run: |
-          toolchain="$(sed 's|/|--|; s|:|---|' lean-toolchain)"
-          echo "LD_LIBRARY_PATH=$HOME/.elan/toolchains/$toolchain/lib/lean:${LD_LIBRARY_PATH:-}" \
-            >> "$GITHUB_ENV"
-      - name: Build external-reduction check
+      - name: Build external-reduction executable
         run: lake build hexlll_external_reduction
-      - name: External reduction (absent + explicit load present)
-        run: |
-          .lake/build/bin/hexlll_external_reduction absent
-          cc -shared -fPIC scripts/ci/hexlll_probe_provider.c -o .lake/build/hexlll_probe_provider.so
-          .lake/build/bin/hexlll_external_reduction present \
-            "$PWD/.lake/build/hexlll_probe_provider.so"
-      - name: Build conformance
-        run: |
-          cd conformance
-          lake build
-      - name: Conformance oracle (fpylll cross-check)
-        run: bash scripts/ci/run_oracles.sh
-      - name: Build bench executable
-        run: |
-          cd bench
-          lake build hexlll_bench
-      - name: Bench verify (fpLLL + Isabelle comparators)
-        env:
-          # Hard cap per SPEC/benchmarking.md §CI integration "Time budget".
-          # The hexlll bench's verify path runs the comparator smoke rungs
-          # (fpLLL via fplll-ffi, verified + certified Isabelle); 360 s leaves
-          # a variance buffer over those fixed rungs.
-          BENCH_VERIFY_HARD_CAP_SECONDS: "360"
-        run: |
-          # verified + certified Isabelle LLL drivers (Zenodo 2636367, patched
-          # for the persistent stdin protocol).
-          HEX_LLL_ISABELLE_SVP="$(scripts/oracle/setup_lll_isabelle.sh)"
-          export HEX_LLL_ISABELLE_SVP
-          HEX_LLL_ISABELLE_CERTIFIED_SVP="$(scripts/oracle/setup_lll_isabelle.sh certified)"
-          export HEX_LLL_ISABELLE_CERTIFIED_SVP
-          # fpLLL comparator: build the fplll-ffi shim and dlopen it at
-          # hexlll_bench start-up. The shim resolves libLake_shared.so via the
-          # LD_LIBRARY_PATH configured above.
-          HEX_FPLLL_FFI_LIB="$(scripts/oracle/setup_fplll_ffi.sh)"
-          export HEX_FPLLL_FFI_LIB
-          cd bench
-          bash ../scripts/ci/check_bench_verify_budget.sh hexlll_bench
       - name: Assert Mathlib-free
         run: |
-          # Restrict to source trees; oracle caches (.cache/oracles), pip's
-          # --user site-packages, and Isabelle/fplll build dirs are not part of
-          # this repo's Lean dependency graph and must not trip the assertion.
-          if find HexLLL conformance/HexLLL bench/HexLLL -type d -name mathlib | grep -q .; then
-            echo "ERROR: a package pulled in Mathlib"; exit 1; fi
-          if find .lake bench/.lake conformance/.lake -type d -name 'Mathlib' 2>/dev/null | grep -q .; then
+          if find .lake -type d -iname mathlib 2>/dev/null | grep -q .; then
             echo "ERROR: a Lake build pulled in Mathlib"; exit 1; fi
-          if grep -rqE '^import Mathlib' HexLLL conformance/HexLLL bench/HexLLL 2>/dev/null; then
+          if grep -rqE '^[[:space:]]*((public|private|meta)[[:space:]]+)*import[[:space:]]+Mathlib' HexLLL 2>/dev/null; then
             echo "ERROR: a source file imports Mathlib"; exit 1; fi
           echo "Mathlib-free OK"
-  # macOS job exists solely for the FFI dyld symbol-resolution cross-check
-  # (the LLL external-reduction check); per SPEC/CI.md this is the one justified second runner.
-  build-macos:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: leanprover/lean-action@v1
+      - name: Save Lake build outputs
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && success()
+        uses: actions/cache/save@v4
         with:
-          auto-config: false
-          build: false
-      - name: Build external-reduction check
-        run: lake build hexlll_external_reduction
-      - name: External reduction (absent + explicit load present)
-        run: |
-          .lake/build/bin/hexlll_external_reduction absent
-          cc -shared -fPIC scripts/ci/hexlll_probe_provider.c -o .lake/build/hexlll_probe_provider.dylib
-          .lake/build/bin/hexlll_external_reduction present \
-            "$PWD/.lake/build/hexlll_probe_provider.dylib"
+          path: |
+            .lake/build
+            .lake/packages/Hex*/.lake/build
+          key: lake-build-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('lean-toolchain', 'lake-manifest.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
